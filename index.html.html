@@ -1,0 +1,1929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bow Sensor Fault Detection — v8</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root {
+  --bg-deep:       #030b18;
+  --bg-mid:        #061224;
+  --bg-panel:      rgba(8, 24, 50, 0.85);
+  --bg-card:       rgba(6,20,45,0.92);
+  --border-dim:    rgba(30,100,200,0.18);
+  --border-bright: rgba(50,140,255,0.35);
+  --accent-blue:   #1e7fff;
+  --accent-cyan:   #00d4ff;
+  --accent-green:  #00e5a0;
+  --accent-amber:  #ffb830;
+  --accent-red:    #ff3b3b;
+  --text-primary:  #e2f0ff;
+  --text-muted:    #5c8aaf;
+  --text-dim:      #2d5a8a;
+  --font-mono:     'Space Mono', monospace;
+  --font-display:  'Orbitron', sans-serif;
+  --font-ui:       'Rajdhani', sans-serif;
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --border-radius-sm: 4px;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-deep);
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Background grid ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0;
+  background-image:
+    linear-gradient(rgba(30,127,255,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30,127,255,0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+}
+body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 0;
+  background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(30,127,255,0.12), transparent);
+  pointer-events: none;
+}
+
+/* ── Layout ── */
+#app {
+  position: relative; z-index: 1;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+/* ── Navigation tabs ── */
+#nav-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  background: rgba(6,20,45,0.7);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--r-lg);
+  padding: 5px;
+  overflow-x: auto;
+}
+.nav-tab {
+  flex-shrink: 0;
+  padding: 8px 18px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.nav-tab:hover { color: var(--text-primary); background: rgba(30,127,255,0.1); }
+.nav-tab.active {
+  color: var(--accent-cyan);
+  background: rgba(30,127,255,0.15);
+  border-color: rgba(0,212,255,0.3);
+}
+.nav-tab.fault-tab { position: relative; }
+.nav-tab .tab-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* ── Page sections ── */
+.page { display: none; }
+.page.active { display: block; }
+
+/* ── Header ── */
+.hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.hdr-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent-cyan);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.hdr-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  margin-top: 3px;
+}
+.hdr-right { display: flex; align-items: center; gap: 10px; }
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.badge::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.badge-ok    { color: var(--accent-green); background: rgba(0,229,160,0.08); border-color: rgba(0,229,160,0.25); }
+.badge-warn  { color: var(--accent-amber); background: rgba(255,184,48,0.08); border-color: rgba(255,184,48,0.25); }
+.badge-fault { color: var(--accent-red);   background: rgba(255,59,59,0.1);   border-color: rgba(255,59,59,0.3); }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+.blinking { animation: blink 0.6s ease-in-out infinite; }
+
+/* ── Metric cards ── */
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0,1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-blue), transparent);
+  opacity: 0.5;
+}
+.metric-card.highlight { border-color: rgba(0,212,255,0.35); }
+.metric-card.highlight::before { background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent); opacity: 1; }
+.metric-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+}
+.metric-val {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+.metric-sub {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+.metric-bar {
+  position: absolute;
+  bottom: 0; left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));
+  transition: width 0.4s ease;
+  border-radius: 0 0 0 var(--r-lg);
+}
+
+/* ── Panels ── */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  backdrop-filter: blur(4px);
+  position: relative;
+}
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-lg);
+  background: linear-gradient(135deg, rgba(30,127,255,0.04) 0%, transparent 60%);
+  pointer-events: none;
+}
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-dim), transparent);
+}
+
+/* ── Charts ── */
+.chart-wrap {
+  position: relative;
+  width: 100%;
+}
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+}
+.legend-line {
+  width: 20px; height: 2px;
+  border-radius: 1px;
+}
+
+/* ── Alarm log ── */
+.alarm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(30,100,200,0.1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.alarm-row:last-child { border-bottom: none; }
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.dot-ok    { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+.dot-warn  { background: var(--accent-amber); box-shadow: 0 0 6px var(--accent-amber); }
+.dot-fault { background: var(--accent-red);   box-shadow: 0 0 6px var(--accent-red); }
+.alarm-ts { color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
+
+/* ── Controls ── */
+.controls-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--r-lg);
+  padding: 16px;
+}
+.fault-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.fault-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 9px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(6,20,45,0.8);
+  position: relative;
+  overflow: hidden;
+}
+.fault-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.fault-btn:hover::before { opacity: 1; }
+.fault-btn.active { transform: translateY(-1px); }
+
+.btn-normal { color: var(--accent-green); border-color: rgba(0,229,160,0.3); }
+.btn-normal::before { background: rgba(0,229,160,0.08); }
+.btn-normal.active { background: rgba(0,229,160,0.15); border-color: rgba(0,229,160,0.6); box-shadow: 0 0 16px rgba(0,229,160,0.2); }
+
+.btn-noise  { color: #ff8c42; border-color: rgba(255,140,66,0.3); }
+.btn-noise::before  { background: rgba(255,140,66,0.08); }
+.btn-noise.active   { background: rgba(255,140,66,0.15); border-color: rgba(255,140,66,0.6); box-shadow: 0 0 16px rgba(255,140,66,0.2); }
+
+.btn-drift  { color: var(--accent-amber); border-color: rgba(255,184,48,0.3); }
+.btn-drift::before  { background: rgba(255,184,48,0.08); }
+.btn-drift.active   { background: rgba(255,184,48,0.15); border-color: rgba(255,184,48,0.6); box-shadow: 0 0 16px rgba(255,184,48,0.2); }
+
+.btn-weak   { color: #b08fff; border-color: rgba(176,143,255,0.3); }
+.btn-weak::before   { background: rgba(176,143,255,0.08); }
+.btn-weak.active    { background: rgba(176,143,255,0.15); border-color: rgba(176,143,255,0.6); box-shadow: 0 0 16px rgba(176,143,255,0.2); }
+
+.btn-dropout { color: var(--accent-red); border-color: rgba(255,59,59,0.3); }
+.btn-dropout::before { background: rgba(255,59,59,0.08); }
+.btn-dropout.active  { background: rgba(255,59,59,0.15); border-color: rgba(255,59,59,0.6); box-shadow: 0 0 16px rgba(255,59,59,0.2); }
+
+.btn-spike   { color: var(--accent-cyan); border-color: rgba(0,212,255,0.3); }
+.btn-spike::before   { background: rgba(0,212,255,0.08); }
+.btn-spike.active    { background: rgba(0,212,255,0.15); border-color: rgba(0,212,255,0.6); box-shadow: 0 0 16px rgba(0,212,255,0.2); }
+
+.slider-row {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.slider-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.slider-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+input[type=range] {
+  accent-color: var(--accent-cyan);
+  width: 110px;
+  cursor: pointer;
+}
+.slider-val {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  min-width: 52px;
+}
+
+/* ── CSV panel ── */
+.csv-panel {
+  background: rgba(0,30,20,0.6);
+  border: 1px solid rgba(0,229,160,0.18);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  margin-top: 12px;
+}
+.csv-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.csv-btn {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.04em;
+}
+.csv-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.csv-btn-rec  { color: var(--accent-red);   background: rgba(255,59,59,0.1);   border-color: rgba(255,59,59,0.35); }
+.csv-btn-rec:hover:not(:disabled)  { background: rgba(255,59,59,0.2); }
+.csv-btn-stop { color: var(--accent-amber); background: rgba(255,184,48,0.1);  border-color: rgba(255,184,48,0.35); }
+.csv-btn-stop:hover:not(:disabled) { background: rgba(255,184,48,0.2); }
+.csv-btn-dl   { color: var(--accent-green); background: rgba(0,229,160,0.1);   border-color: rgba(0,229,160,0.35); }
+.csv-btn-dl:hover:not(:disabled)   { background: rgba(0,229,160,0.2); }
+.csv-btn-clr  { color: var(--text-muted);  background: rgba(255,255,255,0.04); border-color: var(--border-dim); }
+.csv-btn-clr:hover:not(:disabled)  { background: rgba(255,255,255,0.08); }
+.rec-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent-red);
+  margin-right: 5px;
+}
+@keyframes recblink { 0%,100%{opacity:1} 50%{opacity:.1} }
+.rec-dot.active { animation: recblink 0.8s ease-in-out infinite; }
+.csv-stat {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.csv-stat span { color: var(--accent-green); font-weight: 700; }
+.csv-col-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(0,229,160,0.08);
+  border: 1px solid rgba(0,229,160,0.2);
+  border-radius: 3px;
+  padding: 2px 7px;
+  color: rgba(0,229,160,0.8);
+}
+
+/* ── IST clock ── */
+.ist-clock {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+}
+
+/* ── Fault dashboards ── */
+.fault-page-hdr {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--r-lg);
+  margin-bottom: 14px;
+  position: relative;
+  overflow: hidden;
+}
+.fault-page-hdr::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+}
+.fault-icon {
+  font-size: 28px;
+  filter: drop-shadow(0 0 10px currentColor);
+}
+.fault-page-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.fault-page-desc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.6;
+}
+.fault-info-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.fault-info-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+}
+.fault-info-title {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+}
+.fault-info-val {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+.fault-indicators {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.fault-indicator {
+  background: var(--bg-card);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+  text-align: center;
+}
+.fi-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.fi-value {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+}
+.fi-trend {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  margin-top: 4px;
+}
+.fi-up { color: var(--accent-red); }
+.fi-down { color: var(--accent-green); }
+.fi-stable { color: var(--accent-amber); }
+
+/* ── Severity ring ── */
+.severity-ring-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+svg.severity-ring text { font-family: var(--font-display); }
+
+/* ── Back button ── */
+.back-btn {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--r-md);
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.04em;
+}
+.back-btn:hover { color: var(--text-primary); border-color: var(--border-bright); }
+
+/* ── Fault-specific live mini-charts ── */
+.fault-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.fault-mini-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--r-lg);
+  padding: 14px;
+}
+
+/* ── Signature waveform labels ── */
+.waveform-annotation {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ── Detection checklist ── */
+.detect-checklist { list-style: none; }
+.detect-checklist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(30,100,200,0.08);
+}
+.detect-checklist li:last-child { border-bottom: none; }
+.check-icon { flex-shrink: 0; }
+
+/* ── Responsive two-col layout ── */
+.two-col { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(0,1fr); gap: 12px; margin-bottom: 12px; }
+.three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
+
+/* ── Timeline ── */
+.timeline { padding: 8px 0; }
+.timeline-item {
+  display: flex;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 16px;
+}
+.timeline-item:last-child { padding-bottom: 0; }
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: 11px; top: 22px; bottom: 0;
+  width: 1px;
+  background: var(--border-dim);
+}
+.timeline-item:last-child::before { display: none; }
+.tl-dot {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 2px solid;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.tl-content { flex: 1; }
+.tl-title {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.tl-desc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── Gauge bar ── */
+.gauge-bar-wrap {
+  margin-top: 8px;
+}
+.gauge-track {
+  height: 6px;
+  background: rgba(30,100,200,0.15);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.gauge-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+.gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-dim);
+}
+
+/* ── Active fault highlight ── */
+.page-noise  .fault-page-hdr::before { background: linear-gradient(90deg,#ff8c42,transparent); }
+.page-drift  .fault-page-hdr::before { background: linear-gradient(90deg,var(--accent-amber),transparent); }
+.page-weak   .fault-page-hdr::before { background: linear-gradient(90deg,#b08fff,transparent); }
+.page-dropout .fault-page-hdr::before { background: linear-gradient(90deg,var(--accent-red),transparent); }
+.page-spike  .fault-page-hdr::before { background: linear-gradient(90deg,var(--accent-cyan),transparent); }
+
+/* ── Scrollable alarm log ── */
+#alarm-log { max-height: 200px; overflow-y: auto; }
+#alarm-log::-webkit-scrollbar { width: 4px; }
+#alarm-log::-webkit-scrollbar-track { background: transparent; }
+#alarm-log::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
+
+/* ── Pulse ring animation ── */
+@keyframes pulse-ring {
+  0%   { transform: scale(0.9); opacity: 0.8; }
+  70%  { transform: scale(1.3); opacity: 0; }
+  100% { transform: scale(0.9); opacity: 0; }
+}
+.pulse-ring {
+  position: relative; display: inline-block;
+}
+.pulse-ring::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-red);
+  animation: pulse-ring 1.4s ease-out infinite;
+}
+
+/* Main active fault banner */
+#active-fault-banner {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: rgba(255,59,59,0.08);
+  border: 1px solid rgba(255,59,59,0.3);
+  border-radius: var(--r-md);
+  margin-bottom: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-red);
+  letter-spacing: 0.06em;
+}
+#active-fault-banner.show { display: flex; }
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ── Navigation ── -->
+<div id="nav-bar">
+  <button class="nav-tab active" data-page="main" onclick="showPage('main')">
+    ◈ Overview
+  </button>
+  <button class="nav-tab fault-tab" data-page="noise" onclick="showPage('noise')">
+    <span class="tab-dot" style="background:#ff8c42"></span>Signal Noise
+  </button>
+  <button class="nav-tab fault-tab" data-page="drift" onclick="showPage('drift')">
+    <span class="tab-dot" style="background:var(--accent-amber)"></span>Echo Drift
+  </button>
+  <button class="nav-tab fault-tab" data-page="weak" onclick="showPage('weak')">
+    <span class="tab-dot" style="background:#b08fff"></span>Weak Signal
+  </button>
+  <button class="nav-tab fault-tab" data-page="dropout" onclick="showPage('dropout')">
+    <span class="tab-dot" style="background:var(--accent-red)"></span>Dropout
+  </button>
+  <button class="nav-tab fault-tab" data-page="spike" onclick="showPage('spike')">
+    <span class="tab-dot" style="background:var(--accent-cyan)"></span>Spike
+  </button>
+</div>
+
+<!-- ════════════════════ MAIN OVERVIEW PAGE ════════════════════ -->
+<div class="page active" id="page-main">
+
+  <!-- Header -->
+  <div class="hdr">
+    <div>
+      <div class="hdr-title">Bow Sensor Anomaly Detection & Alarm System</div>
+      <div class="hdr-sub">ULTRASONIC SENSOR MONITORING ─ MARINE APPLICATION ─ IST</div>
+    </div>
+    <div class="hdr-right">
+      <div class="ist-clock" id="ist-clock">—</div>
+      <div class="badge badge-ok" id="sys-status">System Normal</div>
+    </div>
+  </div>
+
+  <!-- Active fault banner -->
+  <div id="active-fault-banner">
+    <span class="pulse-ring"><span class="dot dot-fault"></span></span>
+    <span id="banner-text">ACTIVE FAULT —</span>
+    <button class="back-btn" id="banner-view-btn" onclick="">View Fault Dashboard →</button>
+  </div>
+
+  <!-- Metric cards -->
+  <div class="metrics-row">
+    <div class="metric-card" id="card-sig">
+      <div class="metric-label">Signal Strength</div>
+      <div class="metric-val" id="sig-str">98%</div>
+      <div class="metric-bar" id="bar-sig" style="width:98%"></div>
+    </div>
+    <div class="metric-card" id="card-echo">
+      <div class="metric-label">Echo Return Time</div>
+      <div class="metric-val" id="echo-t">1.84 ms</div>
+    </div>
+    <div class="metric-card highlight" id="card-dist">
+      <div class="metric-label">Measured Distance</div>
+      <div class="metric-val" id="meas-dist" style="color:var(--accent-cyan)">—</div>
+      <div class="metric-sub">½ × echo × 343 m/s</div>
+    </div>
+    <div class="metric-card" id="card-noise">
+      <div class="metric-label">Noise Level</div>
+      <div class="metric-val" id="noise-lv">3 dB</div>
+      <div class="metric-bar" id="bar-noise" style="width:5%;background:linear-gradient(90deg,var(--accent-green),var(--accent-amber))"></div>
+    </div>
+    <div class="metric-card" id="card-score">
+      <div class="metric-label">Fault Score</div>
+      <div class="metric-val" id="ai-score">0.04</div>
+      <div class="metric-bar" id="bar-score" style="width:4%;background:linear-gradient(90deg,var(--accent-blue),var(--accent-red))"></div>
+    </div>
+  </div>
+
+  <!-- Waveform chart -->
+  <div class="panel" style="margin-bottom:12px">
+    <div class="section-label">Sensor Waveform &amp; Anomaly Score</div>
+    <div class="chart-legend">
+      <div class="legend-item"><div class="legend-line" style="background:var(--accent-blue)"></div>Sensor Signal</div>
+      <div class="legend-item"><div class="legend-line" style="background:var(--accent-red);border-top:2px dashed var(--accent-red);height:0"></div>Anomaly Score ×1.5</div>
+    </div>
+    <div class="chart-wrap" style="height:160px"><canvas id="waveChart"></canvas></div>
+  </div>
+
+  <!-- Trend + Alarm -->
+  <div class="two-col">
+    <div class="panel">
+      <div class="section-label">Feature Trends — Signal Strength &amp; Noise</div>
+      <div class="chart-legend">
+        <div class="legend-item"><div class="legend-line" style="background:var(--accent-green)"></div>Signal %</div>
+        <div class="legend-item"><div class="legend-line" style="background:var(--accent-amber)"></div>Noise dB</div>
+      </div>
+      <div class="chart-wrap" style="height:130px"><canvas id="trendChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="section-label">Alarm Log</div>
+      <div id="alarm-log">
+        <div class="alarm-row">
+          <span class="dot dot-ok"></span>
+          <span class="alarm-ts">00:00:00</span>
+          <span>System initialised — all nominal</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls-panel" style="margin-bottom:0">
+    <div class="section-label">Inject Fault Scenario</div>
+    <div class="fault-buttons">
+      <button class="fault-btn btn-normal active" id="fbtn-none"    onclick="injectFault('none')">✦ Normal Operation</button>
+      <button class="fault-btn btn-noise"          id="fbtn-noise"   onclick="injectFault('noise')">⚡ Signal Noise / Interference</button>
+      <button class="fault-btn btn-drift"          id="fbtn-drift"   onclick="injectFault('drift')">〜 Echo Drift (Temp Shift)</button>
+      <button class="fault-btn btn-weak"           id="fbtn-weak"    onclick="injectFault('weak')">▽ Weak Signal (Fouling)</button>
+      <button class="fault-btn btn-dropout"        id="fbtn-dropout" onclick="injectFault('dropout')">✕ Signal Dropout</button>
+      <button class="fault-btn btn-spike"          id="fbtn-spike"   onclick="injectFault('spike')">↑ Spike / Transducer Fault</button>
+    </div>
+    <div class="slider-row">
+      <div class="slider-group">
+        <span class="slider-label">Sea State</span>
+        <input type="range" min="0" max="4" value="1" step="1" id="sea-state" oninput="updateSea(this.value)">
+        <span class="slider-val" id="sea-lbl">Calm</span>
+      </div>
+      <div class="slider-group">
+        <span class="slider-label">Ship Speed (kn)</span>
+        <input type="range" min="0" max="25" value="12" step="1" id="ship-spd" oninput="updateSpeed(this.value)">
+        <span class="slider-val" id="spd-lbl">12 kn</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- CSV Panel -->
+  <div class="csv-panel">
+    <div class="section-label" style="color:rgba(0,229,160,0.7)">Data Recording &amp; CSV Export</div>
+    <div class="csv-buttons">
+      <button class="csv-btn csv-btn-rec"  id="btn-rec"  onclick="startRecording()">▶ Start Recording</button>
+      <button class="csv-btn csv-btn-stop" id="btn-stop" onclick="stopRecording()"  disabled>■ Stop Recording</button>
+      <button class="csv-btn csv-btn-dl"   id="btn-dl"   onclick="downloadCSV()"   disabled>↓ Download CSV</button>
+      <button class="csv-btn csv-btn-clr"  id="btn-clr"  onclick="clearRecording()" disabled>✕ Clear</button>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="rec-dot" id="rec-dot"></span>
+        <span class="csv-stat" id="rec-status">Not recording</span>
+      </div>
+      <div class="csv-stat">Rows: <span id="row-count">0</span></div>
+      <div class="csv-stat">Duration: <span id="rec-duration">0 s</span></div>
+      <div class="csv-stat">Rate: <span>2.5 Hz (400 ms)</span></div>
+    </div>
+    <div style="padding-top:10px;border-top:1px solid rgba(0,229,160,0.12)">
+      <div style="font-family:var(--font-mono);font-size:8px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">CSV Columns</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        <span class="csv-col-tag">timestamp_ist</span>
+        <span class="csv-col-tag">elapsed_s</span>
+        <span class="csv-col-tag">tick</span>
+        <span class="csv-col-tag">signal_strength_pct</span>
+        <span class="csv-col-tag">echo_return_time_ms</span>
+        <span class="csv-col-tag">measured_distance_m</span>
+        <span class="csv-col-tag">noise_level_dB</span>
+        <span class="csv-col-tag">wave_amplitude</span>
+        <span class="csv-col-tag">fault_score</span>
+        <span class="csv-col-tag">system_status</span>
+        <span class="csv-col-tag">injected_fault</span>
+        <span class="csv-col-tag">sea_state</span>
+        <span class="csv-col-tag">sea_state_label</span>
+        <span class="csv-col-tag">ship_speed_kn</span>
+      </div>
+    </div>
+  </div>
+</div><!-- /page-main -->
+
+<!-- ════════════════════ NOISE FAULT PAGE ════════════════════ -->
+<div class="page page-noise" id="page-noise">
+  <div class="fault-page-hdr">
+    <div class="fault-icon" style="color:#ff8c42">⚡</div>
+    <div>
+      <div class="fault-page-title" style="color:#ff8c42">Signal Noise / Interference</div>
+      <div class="fault-page-desc">Electromagnetic interference or acoustic crosstalk corrupts the ultrasonic return pulse, raising noise floor and degrading signal clarity. Fault score ramps to ~0.72 over 30 ticks.</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="fault-btn btn-noise" id="inject-noise-btn" onclick="injectFaultAndSwitch('noise')">⚡ Inject This Fault</button>
+      <button class="back-btn" onclick="showPage('main')">← Overview</button>
+    </div>
+  </div>
+
+  <!-- Live fault indicators -->
+  <div class="fault-indicators">
+    <div class="fault-indicator">
+      <div class="fi-label">Signal Strength</div>
+      <div class="fi-value fi-down" id="fn-sig">—</div>
+      <div class="fi-trend fi-down">▼ drops ~18%</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Noise Level</div>
+      <div class="fi-value fi-up" id="fn-noise">—</div>
+      <div class="fi-trend fi-up">▲ +14 dB burst</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Fault Score</div>
+      <div class="fi-value" id="fn-score" style="color:#ff8c42">—</div>
+      <div class="fi-trend fi-up">▲ ramps to 0.72</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Echo Time</div>
+      <div class="fi-value fi-stable" id="fn-echo">—</div>
+      <div class="fi-trend fi-stable">≈ unaffected</div>
+    </div>
+  </div>
+
+  <div class="fault-chart-grid">
+    <div class="fault-mini-panel">
+      <div class="section-label">Live Waveform (Noise Mode)</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="noiseWaveChart"></canvas></div>
+    </div>
+    <div class="fault-mini-panel">
+      <div class="section-label">Noise vs Signal Trend</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="noiseTrendChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="three-col">
+    <div class="panel">
+      <div class="section-label">Root Cause</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:#ff8c42;border-color:#ff8c42">1</div>
+          <div class="tl-content">
+            <div class="tl-title">EMI Source Active</div>
+            <div class="tl-desc">Nearby machinery, radar, or propulsion VFD generates broadband EM noise coupling into sensor leads.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:#ff8c42;border-color:#ff8c42">2</div>
+          <div class="tl-content">
+            <div class="tl-title">Noise Floor Rises</div>
+            <div class="tl-desc">Signal-to-noise ratio degrades; spurious echoes appear in the receive window.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:#ff8c42;border-color:#ff8c42">3</div>
+          <div class="tl-content">
+            <div class="tl-title">False Detections</div>
+            <div class="tl-desc">Anomaly model flags persistent noise as pre-fault, then full alarm at score > 0.55.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="section-label">Detection Criteria</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Signal strength &lt; 80% → WARNING</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Noise dB &gt; 20 → ELEVATED</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Fault score &gt; 0.55 → ALARM</li>
+        <li><span class="check-icon" style="color:var(--accent-green)">✔</span>Echo return time: nominal</li>
+        <li><span class="check-icon" style="color:var(--accent-green)">✔</span>Distance estimate: valid</li>
+        <li><span class="check-icon" style="color:var(--accent-amber)">◎</span>Waveform amplitude: variable</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <div class="section-label">Recommended Actions</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-cyan)">①</span>Inspect sensor cable shielding</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">②</span>Check grounding continuity</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">③</span>Identify & isolate EMI source</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">④</span>Add ferrite chokes to signal cables</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">⑤</span>Notify bridge of degraded sensor</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="section-label">Severity Gauge</div>
+    <div style="padding:8px 0">
+      <div class="gauge-bar-wrap">
+        <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-bottom:4px"><span>Max Fault Score</span><span style="color:#ff8c42">~0.82</span></div>
+        <div class="gauge-track"><div class="gauge-fill" style="width:82%;background:linear-gradient(90deg,var(--accent-green),var(--accent-amber),#ff8c42)"></div></div>
+        <div class="gauge-labels"><span>0.0</span><span>0.25 warn</span><span>0.55 alarm</span><span>1.0</span></div>
+      </div>
+      <div class="gauge-bar-wrap" style="margin-top:10px">
+        <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-bottom:4px"><span>Ramp-up Ticks</span><span style="color:#ff8c42">30 ticks (~12 s)</span></div>
+        <div class="gauge-track"><div class="gauge-fill" style="width:60%;background:linear-gradient(90deg,var(--accent-blue),#ff8c42)"></div></div>
+        <div class="gauge-labels"><span>Instant</span><span>Moderate</span><span>Gradual</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ DRIFT FAULT PAGE ════════════════════ -->
+<div class="page page-drift" id="page-drift">
+  <div class="fault-page-hdr">
+    <div class="fault-icon" style="color:var(--accent-amber)">〜</div>
+    <div>
+      <div class="fault-page-title" style="color:var(--accent-amber)">Echo Drift — Temperature Shift</div>
+      <div class="fault-page-desc">Ambient water temperature changes alter the speed of sound, causing a systematic shift in the echo return time and measured distance. Fault score ramps to ~0.55.</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="fault-btn btn-drift" onclick="injectFaultAndSwitch('drift')">〜 Inject This Fault</button>
+      <button class="back-btn" onclick="showPage('main')">← Overview</button>
+    </div>
+  </div>
+
+  <div class="fault-indicators">
+    <div class="fault-indicator">
+      <div class="fi-label">Echo Return Time</div>
+      <div class="fi-value fi-up" id="fd-echo">—</div>
+      <div class="fi-trend fi-up">▲ +0.8 ms drift</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Measured Distance</div>
+      <div class="fi-value fi-up" id="fd-dist">—</div>
+      <div class="fi-trend fi-up">▲ over-reads</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Fault Score</div>
+      <div class="fi-value" id="fd-score" style="color:var(--accent-amber)">—</div>
+      <div class="fi-trend fi-up">▲ ramps to 0.55</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Signal Strength</div>
+      <div class="fi-value fi-stable" id="fd-sig">—</div>
+      <div class="fi-trend fi-down">▼ mild −8%</div>
+    </div>
+  </div>
+
+  <div class="fault-chart-grid">
+    <div class="fault-mini-panel">
+      <div class="section-label">Live Waveform (Drift Mode)</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="driftWaveChart"></canvas></div>
+    </div>
+    <div class="fault-mini-panel">
+      <div class="section-label">Echo Time Trend</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="driftEchoChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="three-col">
+    <div class="panel">
+      <div class="section-label">Root Cause</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:var(--accent-amber);border-color:var(--accent-amber)">1</div>
+          <div class="tl-content">
+            <div class="tl-title">Temperature Gradient</div>
+            <div class="tl-desc">Seawater temperature changes with depth/season. Speed of sound varies ≈4.6 m/s per °C.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:var(--accent-amber);border-color:var(--accent-amber)">2</div>
+          <div class="tl-content">
+            <div class="tl-title">Echo Time Shift</div>
+            <div class="tl-desc">Fixed 343 m/s assumption no longer holds; measured echo time drifts upward systematically.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:var(--accent-amber);border-color:var(--accent-amber)">3</div>
+          <div class="tl-content">
+            <div class="tl-title">Distance Over-read</div>
+            <div class="tl-desc">Pre-fault warning triggers; navigational data becomes unreliable for obstacle avoidance.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="section-label">Detection Criteria</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-amber)">◎</span>Echo time trending upward &gt; 0.3 ms</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Fault score &gt; 0.25 → PRE-FAULT</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Distance reads amber-highlighted</li>
+        <li><span class="check-icon" style="color:var(--accent-green)">✔</span>Signal strength: near nominal</li>
+        <li><span class="check-icon" style="color:var(--accent-green)">✔</span>Noise level: near nominal</li>
+        <li><span class="check-icon" style="color:var(--accent-green)">✔</span>Waveform shape: intact</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <div class="section-label">Recommended Actions</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-cyan)">①</span>Check seawater temperature sensor</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">②</span>Apply temperature compensation</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">③</span>Recalibrate speed-of-sound constant</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">④</span>Cross-reference with depth sounder</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">⑤</span>Log for trend analysis</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="section-label">Severity Gauge</div>
+    <div style="padding:8px 0">
+      <div class="gauge-bar-wrap">
+        <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-bottom:4px"><span>Max Fault Score</span><span style="color:var(--accent-amber)">~0.63</span></div>
+        <div class="gauge-track"><div class="gauge-fill" style="width:63%;background:linear-gradient(90deg,var(--accent-green),var(--accent-amber))"></div></div>
+        <div class="gauge-labels"><span>0.0</span><span>0.25 warn</span><span>0.55 alarm</span><span>1.0</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ WEAK SIGNAL FAULT PAGE ════════════════════ -->
+<div class="page page-weak" id="page-weak">
+  <div class="fault-page-hdr">
+    <div class="fault-icon" style="color:#b08fff">▽</div>
+    <div>
+      <div class="fault-page-title" style="color:#b08fff">Weak Signal — Transducer Fouling</div>
+      <div class="fault-page-desc">Marine growth (barnacles, algae) or debris accumulation on the transducer face attenuates the transmitted and received ultrasonic pulse. Signal can drop by up to 45%.</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="fault-btn btn-weak" onclick="injectFaultAndSwitch('weak')">▽ Inject This Fault</button>
+      <button class="back-btn" onclick="showPage('main')">← Overview</button>
+    </div>
+  </div>
+
+  <div class="fault-indicators">
+    <div class="fault-indicator">
+      <div class="fi-label">Signal Strength</div>
+      <div class="fi-value fi-down" id="fw-sig">—</div>
+      <div class="fi-trend fi-down">▼ drops −45%</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Wave Amplitude</div>
+      <div class="fi-value fi-down" id="fw-amp">—</div>
+      <div class="fi-trend fi-down">▼ attenuated ×0.3</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Fault Score</div>
+      <div class="fi-value" id="fw-score" style="color:#b08fff">—</div>
+      <div class="fi-trend fi-up">▲ ramps to 0.65</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Echo Time</div>
+      <div class="fi-value fi-stable" id="fw-echo">—</div>
+      <div class="fi-trend fi-stable">≈ near nominal</div>
+    </div>
+  </div>
+
+  <div class="fault-chart-grid">
+    <div class="fault-mini-panel">
+      <div class="section-label">Live Waveform (Weak Mode)</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="weakWaveChart"></canvas></div>
+    </div>
+    <div class="fault-mini-panel">
+      <div class="section-label">Signal Strength Decay</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="weakSigChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="three-col">
+    <div class="panel">
+      <div class="section-label">Root Cause</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:#b08fff;border-color:#b08fff">1</div>
+          <div class="tl-content">
+            <div class="tl-title">Biofouling Growth</div>
+            <div class="tl-desc">Marine organisms colonise transducer face; gradual impedance mismatch increases.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:#b08fff;border-color:#b08fff">2</div>
+          <div class="tl-content">
+            <div class="tl-title">Signal Attenuation</div>
+            <div class="tl-desc">Transmitted power and echo return both diminish; waveform amplitude collapses.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:#b08fff;border-color:#b08fff">3</div>
+          <div class="tl-content">
+            <div class="tl-title">Measurement Degraded</div>
+            <div class="tl-desc">Low-SNR returns increase ranging error; alarm triggers when signal &lt; 55%.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="section-label">Detection Criteria</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Signal strength &lt; 55% → ALARM</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Waveform amplitude &lt; 0.15</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Fault score &gt; 0.65</li>
+        <li><span class="check-icon" style="color:var(--accent-green)">✔</span>Noise level: normal</li>
+        <li><span class="check-icon" style="color:var(--accent-green)">✔</span>Echo time: near nominal</li>
+        <li><span class="check-icon" style="color:var(--accent-amber)">◎</span>Gradual decay signature</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <div class="section-label">Recommended Actions</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-cyan)">①</span>Schedule hull inspection / diving</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">②</span>Clean transducer face mechanically</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">③</span>Apply anti-fouling coating</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">④</span>Recalibrate after cleaning</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">⑤</span>Increase inspection frequency</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="section-label">Severity Gauge</div>
+    <div style="padding:8px 0">
+      <div class="gauge-bar-wrap">
+        <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-bottom:4px"><span>Max Fault Score</span><span style="color:#b08fff">~0.75</span></div>
+        <div class="gauge-track"><div class="gauge-fill" style="width:75%;background:linear-gradient(90deg,var(--accent-green),var(--accent-amber),#b08fff)"></div></div>
+        <div class="gauge-labels"><span>0.0</span><span>0.25 warn</span><span>0.55 alarm</span><span>1.0</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ DROPOUT FAULT PAGE ════════════════════ -->
+<div class="page page-dropout" id="page-dropout">
+  <div class="fault-page-hdr">
+    <div class="fault-icon" style="color:var(--accent-red)">✕</div>
+    <div>
+      <div class="fault-page-title" style="color:var(--accent-red)">Signal Dropout — Complete Loss</div>
+      <div class="fault-page-desc">Intermittent or sustained complete loss of the return echo. Caused by transducer disconnect, power failure, or severe air bubble interference. Fault score jumps to 0.9 on each dropout event.</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="fault-btn btn-dropout" onclick="injectFaultAndSwitch('dropout')">✕ Inject This Fault</button>
+      <button class="back-btn" onclick="showPage('main')">← Overview</button>
+    </div>
+  </div>
+
+  <div class="fault-indicators">
+    <div class="fault-indicator">
+      <div class="fi-label">Signal Strength</div>
+      <div class="fi-value fi-down" id="fdr-sig">—</div>
+      <div class="fi-trend fi-down">▼ drops to 0%</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Distance</div>
+      <div class="fi-value fi-down" id="fdr-dist" style="color:var(--accent-red)">—</div>
+      <div class="fi-trend fi-down">✕ ERR on dropout</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Fault Score</div>
+      <div class="fi-value fi-up" id="fdr-score" style="color:var(--accent-red)">—</div>
+      <div class="fi-trend fi-up">▲ spikes to 0.90</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Dropout Prob.</div>
+      <div class="fi-value fi-up" style="color:var(--accent-red)">~40%</div>
+      <div class="fi-trend fi-up">▲ per ramp tick</div>
+    </div>
+  </div>
+
+  <div class="fault-chart-grid">
+    <div class="fault-mini-panel">
+      <div class="section-label">Live Waveform (Dropout Mode)</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="dropoutWaveChart"></canvas></div>
+    </div>
+    <div class="fault-mini-panel">
+      <div class="section-label">Signal &amp; Score</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="dropoutSigChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="three-col">
+    <div class="panel">
+      <div class="section-label">Root Cause</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:var(--accent-red);border-color:var(--accent-red)">1</div>
+          <div class="tl-content">
+            <div class="tl-title">Connection Failure / Air Bubble</div>
+            <div class="tl-desc">Loose connector, broken cable, or entrained air under the hull blocks acoustic transmission path.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:var(--accent-red);border-color:var(--accent-red)">2</div>
+          <div class="tl-content">
+            <div class="tl-title">Intermittent Zero-Signal</div>
+            <div class="tl-desc">Signal collapses to 0% intermittently; waveform flatlines; distance returns ERR.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:var(--accent-red);border-color:var(--accent-red)">3</div>
+          <div class="tl-content">
+            <div class="tl-title">Critical Alarm</div>
+            <div class="tl-desc">Fault score jumps to 0.9 on each dropout event; bridge notification mandatory.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="section-label">Detection Criteria</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Signal = 0% → CRITICAL ALARM</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Distance shows ERR</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Fault score spikes to 0.90</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Waveform flatlines at 0</li>
+        <li><span class="check-icon" style="color:var(--accent-amber)">◎</span>May recover between events</li>
+        <li><span class="check-icon" style="color:var(--accent-amber)">◎</span>Probability rises with ramp</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <div class="section-label">Recommended Actions</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-red)">⚠</span>Immediately notify bridge officer</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">①</span>Check transducer power & connector</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">②</span>Inspect cable continuity</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">③</span>Check for hull air entrainment</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">④</span>Switch to backup sensor if available</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="section-label">Severity Gauge</div>
+    <div style="padding:8px 0">
+      <div class="gauge-bar-wrap">
+        <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-bottom:4px"><span>Peak Fault Score</span><span style="color:var(--accent-red)">~0.90</span></div>
+        <div class="gauge-track"><div class="gauge-fill" style="width:90%;background:linear-gradient(90deg,var(--accent-amber),var(--accent-red))"></div></div>
+        <div class="gauge-labels"><span>0.0</span><span>0.25 warn</span><span>0.55 alarm</span><span>1.0</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ SPIKE FAULT PAGE ════════════════════ -->
+<div class="page page-spike" id="page-spike">
+  <div class="fault-page-hdr">
+    <div class="fault-icon" style="color:var(--accent-cyan)">↑</div>
+    <div>
+      <div class="fault-page-title" style="color:var(--accent-cyan)">Spike — Transducer Fault</div>
+      <div class="fault-page-desc">Intermittent high-amplitude spikes caused by transducer piezo crystal cracking, internal arcing, or cavitation. Occur randomly (~8–15% probability) with 5× normal amplitude.</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button class="fault-btn btn-spike" onclick="injectFaultAndSwitch('spike')">↑ Inject This Fault</button>
+      <button class="back-btn" onclick="showPage('main')">← Overview</button>
+    </div>
+  </div>
+
+  <div class="fault-indicators">
+    <div class="fault-indicator">
+      <div class="fi-label">Wave Amplitude</div>
+      <div class="fi-value fi-up" id="fsp-amp">—</div>
+      <div class="fi-trend fi-up">▲ spike up to ×5</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Spike Prob.</div>
+      <div class="fi-value fi-up" style="color:var(--accent-cyan)">8–15%</div>
+      <div class="fi-trend fi-up">▲ per tick</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Fault Score</div>
+      <div class="fi-value" id="fsp-score" style="color:var(--accent-cyan)">—</div>
+      <div class="fi-trend fi-up">▲ ramps to 0.60+</div>
+    </div>
+    <div class="fault-indicator">
+      <div class="fi-label">Signal Strength</div>
+      <div class="fi-value fi-stable" id="fsp-sig">—</div>
+      <div class="fi-trend fi-stable">≈ near nominal</div>
+    </div>
+  </div>
+
+  <div class="fault-chart-grid">
+    <div class="fault-mini-panel">
+      <div class="section-label">Live Waveform (Spike Mode)</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="spikeWaveChart"></canvas></div>
+    </div>
+    <div class="fault-mini-panel">
+      <div class="section-label">Fault Score Timeline</div>
+      <div class="chart-wrap" style="height:140px"><canvas id="spikeSigChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="three-col">
+    <div class="panel">
+      <div class="section-label">Root Cause</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:var(--accent-cyan);border-color:var(--accent-cyan)">1</div>
+          <div class="tl-content">
+            <div class="tl-title">Crystal Degradation</div>
+            <div class="tl-desc">Piezoelectric crystal develops micro-fractures from prolonged vibration or cavitation impact.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:var(--accent-cyan);border-color:var(--accent-cyan)">2</div>
+          <div class="tl-content">
+            <div class="tl-title">Spurious Discharges</div>
+            <div class="tl-desc">Random high-voltage pulses fired internally; appear as massive amplitude spikes in waveform.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-dot" style="color:var(--accent-cyan);border-color:var(--accent-cyan)">3</div>
+          <div class="tl-content">
+            <div class="tl-title">Intermittent Alarm</div>
+            <div class="tl-desc">Anomaly score spikes to 0.95 during events; otherwise intermittent pre-fault state.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="section-label">Detection Criteria</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Waveform amplitude &gt; 2.0 → SPIKE</li>
+        <li><span class="check-icon" style="color:var(--accent-red)">✕</span>Fault score &gt; 0.55 during event</li>
+        <li><span class="check-icon" style="color:var(--accent-amber)">◎</span>Score may drop between events</li>
+        <li><span class="check-icon" style="color:var(--accent-green)">✔</span>Signal strength: near nominal</li>
+        <li><span class="check-icon" style="color:var(--accent-green)">✔</span>Echo time: near nominal</li>
+        <li><span class="check-icon" style="color:var(--accent-amber)">◎</span>Random, not periodic pattern</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <div class="section-label">Recommended Actions</div>
+      <ul class="detect-checklist">
+        <li><span class="check-icon" style="color:var(--accent-cyan)">①</span>Log spike event timestamps</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">②</span>Inspect transducer housing for cracks</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">③</span>Check for cavitation on hull form</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">④</span>Replace transducer at next dry-dock</li>
+        <li><span class="check-icon" style="color:var(--accent-cyan)">⑤</span>Monitor frequency of spike events</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="section-label">Severity Gauge</div>
+    <div style="padding:8px 0">
+      <div class="gauge-bar-wrap">
+        <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);margin-bottom:4px"><span>Peak Fault Score (during event)</span><span style="color:var(--accent-cyan)">~0.95</span></div>
+        <div class="gauge-track"><div class="gauge-fill" style="width:95%;background:linear-gradient(90deg,var(--accent-blue),var(--accent-cyan),var(--accent-red))"></div></div>
+        <div class="gauge-labels"><span>0.0</span><span>0.25 warn</span><span>0.55 alarm</span><span>1.0</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /app -->
+
+<script>
+// ════════════════════════════════════════════════════════════
+// BACKEND — UNCHANGED SIMULATION LOGIC
+// ════════════════════════════════════════════════════════════
+var fault = 'none';
+var seaState = 1;
+var shipSpeed = 12;
+var tick = 0;
+var alarmCount = 0;
+var faultOnset = null;
+
+var seaLabels    = ['Calm','Light','Moderate','Rough','Storm'];
+var seaBaseNoise  = [2, 8, 18, 32, 50];
+var seaSigPenalty = [0, 4, 10, 20, 35];
+
+var waveData  = Array(80).fill(0).map(function(){ return Math.sin(Math.random()*Math.PI)*0.1; });
+var scoreData = Array(40).fill(0);
+var sigData   = Array(40).fill(98);
+var noiseData = Array(40).fill(2);
+
+// CSV recording state
+var csvRows      = [];
+var isRecording  = false;
+var recStartTime = null;
+var recStartTick = 0;
+
+var CSV_HEADER = [
+  'timestamp_ist','elapsed_s','tick','signal_strength_pct',
+  'echo_return_time_ms','measured_distance_m','noise_level_dB',
+  'wave_amplitude','fault_score','system_status',
+  'injected_fault','sea_state','sea_state_label','ship_speed_kn'
+].join(',');
+
+function startRecording() {
+  csvRows = []; isRecording = true;
+  recStartTime = new Date(); recStartTick = tick;
+  document.getElementById('btn-rec').disabled  = true;
+  document.getElementById('btn-stop').disabled = false;
+  document.getElementById('btn-dl').disabled   = true;
+  document.getElementById('btn-clr').disabled  = true;
+  document.getElementById('rec-dot').classList.add('active');
+  document.getElementById('rec-status').textContent = 'Recording…';
+  document.getElementById('row-count').textContent   = '0';
+  document.getElementById('rec-duration').textContent = '0 s';
+  addAlarm('ok', 'CSV recording started');
+}
+function stopRecording() {
+  isRecording = false;
+  document.getElementById('btn-rec').disabled  = false;
+  document.getElementById('btn-stop').disabled = true;
+  document.getElementById('btn-dl').disabled   = csvRows.length === 0;
+  document.getElementById('btn-clr').disabled  = csvRows.length === 0;
+  document.getElementById('rec-dot').classList.remove('active');
+  document.getElementById('rec-status').textContent = 'Stopped — ' + csvRows.length + ' rows ready';
+  addAlarm('ok', 'Recording stopped — ' + csvRows.length + ' rows captured');
+}
+function clearRecording() {
+  csvRows = [];
+  document.getElementById('btn-dl').disabled   = true;
+  document.getElementById('btn-clr').disabled  = true;
+  document.getElementById('rec-status').textContent = 'Not recording';
+  document.getElementById('row-count').textContent  = '0';
+  document.getElementById('rec-duration').textContent = '0 s';
+}
+function toIST(date) {
+  var pad2 = function(n){ return String(n).padStart(2,'0'); };
+  var ist  = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
+  return ist.getUTCFullYear()
+    + '-' + pad2(ist.getUTCMonth()+1)
+    + '-' + pad2(ist.getUTCDate())
+    + ' ' + pad2(ist.getUTCHours())
+    + ':' + pad2(ist.getUTCMinutes())
+    + ':' + pad2(ist.getUTCSeconds())
+    + ' IST';
+}
+function downloadCSV() {
+  if (csvRows.length === 0) return;
+  var now = new Date();
+  var meta = [
+    '# Bow Sensor Fault Detection — Exported Data',
+    '# Export timestamp: ' + toIST(now),
+    '# Recording start:  ' + toIST(recStartTime),
+    '# Total rows: ' + csvRows.length,
+    '# Sample interval: 400 ms (2.5 Hz)',
+    '# Columns: ' + CSV_HEADER.split(',').length,
+    '#'
+  ].join('\n');
+  var lines = csvRows.map(function(r) {
+    return [r.timestamp_ist,r.elapsed_s,r.tick,r.signal_strength_pct,
+      r.echo_return_time_ms,r.measured_distance_m,r.noise_level_dB,
+      r.wave_amplitude,r.fault_score,r.system_status,
+      r.injected_fault,r.sea_state,r.sea_state_label,r.ship_speed_kn].join(',');
+  });
+  var csvContent = meta + '\n' + CSV_HEADER + '\n' + lines.join('\n');
+  var pad2 = function(n){ return String(n).padStart(2,'0'); };
+  var istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  var fn = 'bow_sensor_' + istNow.getUTCFullYear()
+    + pad2(istNow.getUTCMonth()+1) + pad2(istNow.getUTCDate())
+    + '_' + pad2(istNow.getUTCHours()) + pad2(istNow.getUTCMinutes())
+    + pad2(istNow.getUTCSeconds()) + '_IST.csv';
+  var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href = url; a.download = fn;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  addAlarm('ok', 'CSV downloaded — ' + fn);
+}
+
+// ─── Controls ─────────────────────────────────────────────────────────────────
+function injectFault(f) {
+  fault = f;
+  faultOnset = f === 'none' ? null : tick;
+  if (f !== 'none') addAlarm('warn', 'Fault scenario injected: ' + f);
+  else addAlarm('ok', 'Returned to normal operation');
+  updateFaultButtons(f);
+  updateBanner(f);
+}
+function injectFaultAndSwitch(f) {
+  injectFault(f);
+  showPage(f === 'none' ? 'main' : f);
+}
+function updateFaultButtons(f) {
+  var btns = ['none','noise','drift','weak','dropout','spike'];
+  btns.forEach(function(b){
+    var el = document.getElementById('fbtn-' + b);
+    if (el) el.classList.toggle('active', b === f);
+  });
+}
+function updateBanner(f) {
+  var banner = document.getElementById('active-fault-banner');
+  if (f === 'none') { banner.classList.remove('show'); return; }
+  banner.classList.add('show');
+  var names = {noise:'Signal Noise',drift:'Echo Drift',weak:'Weak Signal',dropout:'Signal Dropout',spike:'Spike Fault'};
+  document.getElementById('banner-text').textContent = 'ACTIVE FAULT — ' + (names[f]||f).toUpperCase();
+  document.getElementById('banner-view-btn').onclick = function(){ showPage(f); };
+}
+function updateSea(v) {
+  seaState = parseInt(v);
+  document.getElementById('sea-lbl').textContent = seaLabels[seaState];
+}
+function updateSpeed(v) {
+  shipSpeed = parseInt(v);
+  document.getElementById('spd-lbl').textContent = v + ' kn';
+}
+
+// ─── Main simulation loop ─────────────────────────────────────────────────────
+function simulate() {
+  tick++;
+  var baseNoise      = seaBaseNoise[seaState] + shipSpeed * 0.15;
+  var noiseFluctuation = (seaState + 1) * 1.2;
+  var noise = baseNoise + (Math.random() - 0.5) * noiseFluctuation;
+  noise = Math.max(0, noise);
+  var baseSig       = 100 - seaSigPenalty[seaState] - shipSpeed * 0.25;
+  var sigFluctuation = (seaState + 1) * 1.5;
+  var sig = baseSig + (Math.random() - 0.5) * sigFluctuation;
+  sig = Math.max(0, Math.min(100, sig));
+  var echoBase   = 1.84;
+  var faultScore = 0;
+  var waveAmp    = 0.35 + seaState * 0.12;
+  var noiseMult  = 1;
+  var age  = faultOnset !== null ? tick - faultOnset : 0;
+  var ramp = Math.min(age / 30, 1);
+  if (fault === 'noise') {
+    noiseMult  = 1 + ramp * 5;
+    faultScore = ramp * 0.72 + Math.random() * 0.1;
+    sig   -= ramp * 18;
+    noise += ramp * 14;
+  } else if (fault === 'drift') {
+    echoBase  += ramp * 0.8;
+    faultScore = ramp * 0.55 + Math.random() * 0.08;
+    sig -= ramp * 8;
+  } else if (fault === 'weak') {
+    sig       -= ramp * 45;
+    faultScore = ramp * 0.65 + Math.random() * 0.1;
+    waveAmp   *= (1 - ramp * 0.7);
+  } else if (fault === 'dropout') {
+    if (Math.random() < ramp * 0.4) { sig = 0; faultScore = 0.9; }
+    else faultScore = ramp * 0.4;
+  } else if (fault === 'spike') {
+    waveAmp   += ramp * (Math.random() < 0.15 ? 4 : 0);
+    faultScore = ramp * 0.6 + (Math.random() < 0.1 ? 0.35 : 0);
+  }
+  sig        = Math.max(0, Math.min(100, sig));
+  noise      = Math.max(0, noise);
+  faultScore = Math.min(faultScore + Math.random() * 0.04, 1);
+  var echo       = echoBase + (Math.random() - 0.5) * 0.04;
+  var speedOfSound = 343;
+  var dist       = (echo / 1000) * speedOfSound / 2;
+  var distJitter = seaState * 0.08;
+  dist += (Math.random() - 0.5) * distJitter;
+  dist = Math.max(0, dist);
+  var wave = Math.sin(tick * 0.6) * waveAmp + (Math.random()-0.5)*0.2*noiseMult;
+  if (fault === 'spike'   && Math.random() < 0.08)     wave += (Math.random()-0.5) * 5;
+  if (fault === 'dropout' && Math.random() < ramp*0.3) wave = 0;
+
+  // ── Status label ──
+  var statusLabel;
+  var statusEl = document.getElementById('sys-status');
+  if (faultScore < 0.25) {
+    statusLabel = 'normal';
+    statusEl.className   = 'badge badge-ok';
+    statusEl.textContent = 'System Normal';
+  } else if (faultScore < 0.55) {
+    statusLabel = 'pre-fault';
+    if (!statusEl.classList.contains('badge-warn')) {
+      statusEl.className   = 'badge badge-warn';
+      statusEl.textContent = 'Pre-Fault Warning';
+      addAlarm('warn', 'Pre-failure pattern detected — score ' + faultScore.toFixed(2));
+    }
+  } else {
+    statusLabel = 'fault';
+    if (!statusEl.classList.contains('badge-fault')) {
+      statusEl.className   = 'badge badge-fault blinking';
+      statusEl.textContent = 'FAULT ALARM';
+      addAlarm('fault', 'ALARM: Sensor fault confirmed — ' + fault.toUpperCase() + '. Notify bridge officer.');
+    }
+  }
+
+  // ── Chart buffers ──
+  waveData.shift();  waveData.push(parseFloat(wave.toFixed(3)));
+  scoreData.shift(); scoreData.push(parseFloat(faultScore.toFixed(3)));
+  sigData.shift();   sigData.push(parseFloat(sig.toFixed(1)));
+  noiseData.shift(); noiseData.push(parseFloat(noise.toFixed(1)));
+
+  waveChart.data.datasets[0].data = waveData;
+  waveChart.data.datasets[1].data = Array(40).fill(null).concat(scoreData.map(function(s){ return parseFloat((s*1.5).toFixed(3)); }));
+  waveChart.update('none');
+  trendChart.data.datasets[0].data = sigData;
+  trendChart.data.datasets[1].data = noiseData;
+  trendChart.update('none');
+
+  // ── Metric cards ──
+  document.getElementById('sig-str').textContent  = Math.round(sig) + '%';
+  document.getElementById('echo-t').textContent   = echo.toFixed(2) + ' ms';
+  document.getElementById('noise-lv').textContent = noise.toFixed(1) + ' dB';
+  document.getElementById('ai-score').textContent = faultScore.toFixed(2);
+  document.getElementById('bar-sig').style.width   = Math.round(sig) + '%';
+  document.getElementById('bar-noise').style.width = Math.min(noise / 55 * 100, 100).toFixed(1) + '%';
+  document.getElementById('bar-score').style.width = (faultScore * 100).toFixed(1) + '%';
+
+  var distEl = document.getElementById('meas-dist');
+  var distValue;
+  if (fault === 'dropout' && sig === 0) {
+    distEl.textContent = 'ERR';
+    distEl.style.color = 'var(--accent-red)';
+    distValue = '';
+  } else {
+    distEl.textContent = dist.toFixed(2) + ' m';
+    distEl.style.color = fault === 'drift' ? 'var(--accent-amber)' : 'var(--accent-cyan)';
+    distValue = dist.toFixed(4);
+  }
+
+  // ── Update fault page live indicators ──
+  updateFaultPageIndicators(sig, echo, noise, faultScore, dist, wave, distValue, fault);
+
+  // ── CSV ──
+  if (isRecording) {
+    var now     = new Date();
+    var elapsed = ((now - recStartTime) / 1000).toFixed(2);
+    csvRows.push({
+      timestamp_ist: toIST(now), elapsed_s: elapsed, tick: tick,
+      signal_strength_pct: sig.toFixed(2), echo_return_time_ms: echo.toFixed(4),
+      measured_distance_m: distValue, noise_level_dB: noise.toFixed(3),
+      wave_amplitude: wave.toFixed(4), fault_score: faultScore.toFixed(4),
+      system_status: statusLabel, injected_fault: fault,
+      sea_state: seaState, sea_state_label: seaLabels[seaState], ship_speed_kn: shipSpeed
+    });
+    document.getElementById('row-count').textContent    = csvRows.length;
+    document.getElementById('rec-duration').textContent = elapsed + ' s';
+  }
+
+  // ── Update secondary charts on fault pages ──
+  updateFaultCharts(wave, sig, noise, faultScore, echo);
+}
+
+setInterval(simulate, 400);
+
+// ════════════════════════════════════════════════════════════
+// FRONT-END ENHANCEMENTS
+// ════════════════════════════════════════════════════════════
+
+// ─── IST Clock ───
+function updateClock() {
+  var now = new Date();
+  var ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  var pad = function(n){ return String(n).padStart(2,'0'); };
+  document.getElementById('ist-clock').textContent =
+    pad(ist.getUTCHours()) + ':' + pad(ist.getUTCMinutes()) + ':' + pad(ist.getUTCSeconds()) + ' IST';
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ─── Page Navigation ─────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+  document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
+  var pg = document.getElementById('page-' + name);
+  if (pg) pg.classList.add('active');
+  var tab = document.querySelector('[data-page="' + name + '"]');
+  if (tab) tab.classList.add('active');
+}
+
+// ─── Main Charts ──────────────────────────────────────────────
+var chartDefaults = {
+  responsive: true, maintainAspectRatio: false, animation: false,
+  plugins: { legend: { display: false } }
+};
+var gridColor = 'rgba(30,100,200,0.1)';
+
+var waveChart = new Chart(document.getElementById('waveChart').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: Array(80).fill(''),
+    datasets: [
+      { label: 'Sensor signal', data: waveData, borderColor: '#1e7fff', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: false },
+      { label: 'Anomaly score ×1.5', data: Array(40).fill(null).concat(scoreData), borderColor: '#ff3b3b', borderWidth: 1.5, borderDash: [4,3], pointRadius: 0, tension: 0.4, fill: false }
+    ]
+  },
+  options: Object.assign({}, chartDefaults, {
+    scales: {
+      x: { display: false },
+      y: { min: -2, max: 2, grid: { color: gridColor }, ticks: { font: { size: 10, family: 'Space Mono' }, color: '#5c8aaf', callback: function(v){ return v.toFixed(1); } } }
+    }
+  })
+});
+
+var trendChart = new Chart(document.getElementById('trendChart').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: Array(40).fill(''),
+    datasets: [
+      { label: 'Signal %', data: sigData,   borderColor: '#00e5a0', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: false, yAxisID: 'y'  },
+      { label: 'Noise dB', data: noiseData, borderColor: '#ffb830', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: false, yAxisID: 'y2' }
+    ]
+  },
+  options: Object.assign({}, chartDefaults, {
+    scales: {
+      x:  { display: false },
+      y:  { min: 0, max: 110, grid: { color: gridColor }, ticks: { font: { size: 9, family: 'Space Mono' }, color: '#00e5a0', callback: function(v){ return v+'%'; } }, position: 'left' },
+      y2: { min: 0, max: 55, grid: { display: false }, ticks: { font: { size: 9, family: 'Space Mono' }, color: '#ffb830', callback: function(v){ return v+'dB'; } }, position: 'right' }
+    }
+  })
+});
+
+// ─── Fault Page Mini Charts ───────────────────────────────────
+var faultWaveBuffers = {};
+var faultSigBuffers = {};
+var faultCharts = {};
+var FBUF = 60;
+
+var faultPageDefs = [
+  { key: 'noise',   waveColor: '#ff8c42', sigColor: '#ff8c42',       sig2Color: '#ffb830', sigLabel: 'Signal %', sig2Label: 'Noise dB', sigMin: 0, sigMax: 110, sig2Min: 0, sig2Max: 55 },
+  { key: 'drift',   waveColor: '#ffb830', sigColor: '#ffb830',       sig2Color: '#00d4ff', sigLabel: 'Echo ms', sig2Label: 'Signal %',  sigMin: 1.7, sigMax: 2.8, sig2Min: 0, sig2Max: 110 },
+  { key: 'weak',    waveColor: '#b08fff', sigColor: '#b08fff',       sig2Color: '#00e5a0', sigLabel: 'Signal %', sig2Label: 'Score',    sigMin: 0, sigMax: 110, sig2Min: 0, sig2Max: 1 },
+  { key: 'dropout', waveColor: '#ff3b3b', sigColor: '#ff3b3b',       sig2Color: '#ffb830', sigLabel: 'Signal %', sig2Label: 'Score',    sigMin: 0, sigMax: 110, sig2Min: 0, sig2Max: 1 },
+  { key: 'spike',   waveColor: '#00d4ff', sigColor: '#00d4ff',       sig2Color: '#ff3b3b', sigLabel: 'Score',    sig2Label: null,       sigMin: 0, sigMax: 1,   sig2Min: null, sig2Max: null }
+];
+
+faultPageDefs.forEach(function(def) {
+  faultWaveBuffers[def.key] = Array(FBUF).fill(0);
+  faultSigBuffers[def.key]  = { a: Array(FBUF).fill(0), b: Array(FBUF).fill(0) };
+
+  var wCtx = document.getElementById(def.key + 'WaveChart');
+  var sCtx = document.getElementById(def.key === 'spike' ? 'spikeSigChart' : (def.key + (def.key === 'noise' ? 'Trend' : def.key === 'drift' ? 'Echo' : 'Sig') + 'Chart'));
+  if (!wCtx || !sCtx) return;
+
+  var wChart = new Chart(wCtx.getContext('2d'), {
+    type: 'line',
+    data: { labels: Array(FBUF).fill(''), datasets: [{ label: 'Wave', data: faultWaveBuffers[def.key], borderColor: def.waveColor, borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: false }] },
+    options: Object.assign({}, chartDefaults, {
+      scales: { x: { display: false }, y: { min: -5, max: 5, grid: { color: gridColor }, ticks: { font: { size: 9, family: 'Space Mono' }, color: '#5c8aaf', callback: function(v){ return v.toFixed(1); } } } }
+    })
+  });
+
+  var sDatasets = [{ label: def.sigLabel, data: faultSigBuffers[def.key].a, borderColor: def.sigColor, borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: false, yAxisID: 'y' }];
+  var sScales = { x: { display: false }, y: { min: def.sigMin, max: def.sigMax, grid: { color: gridColor }, ticks: { font: { size: 9, family: 'Space Mono' }, color: def.sigColor, callback: function(v){ return v.toFixed(1); } }, position: 'left' } };
+  if (def.sig2Label) {
+    sDatasets.push({ label: def.sig2Label, data: faultSigBuffers[def.key].b, borderColor: def.sig2Color, borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: false, yAxisID: 'y2' });
+    sScales.y2 = { min: def.sig2Min, max: def.sig2Max, grid: { display: false }, ticks: { font: { size: 9, family: 'Space Mono' }, color: def.sig2Color, callback: function(v){ return v.toFixed(1); } }, position: 'right' };
+  }
+  var sChart = new Chart(sCtx.getContext('2d'), {
+    type: 'line',
+    data: { labels: Array(FBUF).fill(''), datasets: sDatasets },
+    options: Object.assign({}, chartDefaults, { scales: sScales })
+  });
+
+  faultCharts[def.key] = { w: wChart, s: sChart, def: def };
+});
+
+function updateFaultCharts(wave, sig, noise, faultScore, echo) {
+  faultPageDefs.forEach(function(def) {
+    var buf = faultWaveBuffers[def.key];
+    var sbuf = faultSigBuffers[def.key];
+    buf.shift(); buf.push(parseFloat(wave.toFixed(3)));
+    if (def.key === 'noise')   { sbuf.a.shift(); sbuf.a.push(sig);       sbuf.b.shift(); sbuf.b.push(noise); }
+    if (def.key === 'drift')   { sbuf.a.shift(); sbuf.a.push(echo);      sbuf.b.shift(); sbuf.b.push(sig); }
+    if (def.key === 'weak')    { sbuf.a.shift(); sbuf.a.push(sig);       sbuf.b.shift(); sbuf.b.push(faultScore); }
+    if (def.key === 'dropout') { sbuf.a.shift(); sbuf.a.push(sig);       sbuf.b.shift(); sbuf.b.push(faultScore); }
+    if (def.key === 'spike')   { sbuf.a.shift(); sbuf.a.push(faultScore); }
+
+    var fc = faultCharts[def.key];
+    if (!fc) return;
+    fc.w.data.datasets[0].data = buf;
+    fc.w.update('none');
+    fc.s.data.datasets[0].data = sbuf.a;
+    if (fc.s.data.datasets[1]) fc.s.data.datasets[1].data = sbuf.b;
+    fc.s.update('none');
+  });
+}
+
+function updateFaultPageIndicators(sig, echo, noise, faultScore, dist, wave, distValue, activeFault) {
+  // Noise page
+  var fn_sig = document.getElementById('fn-sig');   if(fn_sig)   fn_sig.textContent   = Math.round(sig)+'%';
+  var fn_no  = document.getElementById('fn-noise'); if(fn_no)    fn_no.textContent    = noise.toFixed(1)+' dB';
+  var fn_sc  = document.getElementById('fn-score'); if(fn_sc)    fn_sc.textContent    = faultScore.toFixed(2);
+  var fn_ec  = document.getElementById('fn-echo');  if(fn_ec)    fn_ec.textContent    = echo.toFixed(2)+' ms';
+  // Drift page
+  var fd_ec  = document.getElementById('fd-echo');  if(fd_ec)    fd_ec.textContent    = echo.toFixed(2)+' ms';
+  var fd_di  = document.getElementById('fd-dist');  if(fd_di)    fd_di.textContent    = distValue ? parseFloat(distValue).toFixed(2)+' m' : 'ERR';
+  var fd_sc  = document.getElementById('fd-score'); if(fd_sc)    fd_sc.textContent    = faultScore.toFixed(2);
+  var fd_si  = document.getElementById('fd-sig');   if(fd_si)    fd_si.textContent    = Math.round(sig)+'%';
+  // Weak page
+  var fw_si  = document.getElementById('fw-sig');   if(fw_si)    fw_si.textContent    = Math.round(sig)+'%';
+  var fw_am  = document.getElementById('fw-amp');   if(fw_am)    fw_am.textContent    = Math.abs(wave).toFixed(2);
+  var fw_sc  = document.getElementById('fw-score'); if(fw_sc)    fw_sc.textContent    = faultScore.toFixed(2);
+  var fw_ec  = document.getElementById('fw-echo');  if(fw_ec)    fw_ec.textContent    = echo.toFixed(2)+' ms';
+  // Dropout page
+  var fdr_si = document.getElementById('fdr-sig');  if(fdr_si)   fdr_si.textContent   = Math.round(sig)+'%';
+  var fdr_di = document.getElementById('fdr-dist'); if(fdr_di)   fdr_di.textContent   = distValue ? parseFloat(distValue).toFixed(2)+' m' : 'ERR';
+  var fdr_sc = document.getElementById('fdr-score');if(fdr_sc)   fdr_sc.textContent   = faultScore.toFixed(2);
+  // Spike page
+  var fsp_am = document.getElementById('fsp-amp');  if(fsp_am)   fsp_am.textContent   = Math.abs(wave).toFixed(2);
+  var fsp_sc = document.getElementById('fsp-score');if(fsp_sc)   fsp_sc.textContent   = faultScore.toFixed(2);
+  var fsp_si = document.getElementById('fsp-sig');  if(fsp_si)   fsp_si.textContent   = Math.round(sig)+'%';
+}
+
+// ─── Alarm log ────────────────────────────────────────────────
+function addAlarm(level, msg) {
+  var log = document.getElementById('alarm-log');
+  var row = document.createElement('div');
+  row.className = 'alarm-row';
+  var pad = function(n){ return String(n).padStart(2,'0'); };
+  var t = new Date();
+  var ts = pad(t.getHours())+':'+pad(t.getMinutes())+':'+pad(t.getSeconds());
+  var dotClass = level === 'ok' ? 'dot-ok' : level === 'warn' ? 'dot-warn' : 'dot-fault';
+  var color = level === 'fault' ? 'var(--accent-red)' : level === 'warn' ? 'var(--accent-amber)' : 'var(--text-primary)';
+  row.innerHTML = '<span class="dot '+dotClass+'"></span><span class="alarm-ts">'+ts+'</span><span style="color:'+color+'">'+msg+'</span>';
+  log.insertBefore(row, log.firstChild);
+  while (log.children.length > 10) log.removeChild(log.lastChild);
+  alarmCount++;
+}
+
+// Init button state
+updateFaultButtons('none');
+</script>
+</body>
+</html>
