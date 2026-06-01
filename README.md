@@ -1,8 +1,8 @@
-# Bow Sensor Fault Detection & Alarm System
+# Ultrasonic Sensor Fault Detection & Alarm System
 
 ## Project Overview
 
-This project is an AI-driven Bow Sensor Fault Detection and Alarm System developed for marine applications.
+This project is an AI-driven Ultrasonic Sensor Fault Detection and Alarm System developed for marine applications.
 
 The system continuously monitors ultrasonic sensor signals and detects abnormal operating conditions using anomaly scoring and fault classification techniques.
 
