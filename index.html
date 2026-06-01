@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Bow Sensor Fault Detection — v8</title>
+<title>Ultrasonic Sensor Fault Detection — v8</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
@@ -770,7 +770,7 @@ svg.severity-ring text { font-family: var(--font-display); }
   <!-- Header -->
   <div class="hdr">
     <div>
-      <div class="hdr-title">Bow Sensor Anomaly Detection & Alarm System</div>
+      <div class="hdr-title">Ultrasonic Sensor Anomaly Detection & Alarm System</div>
       <div class="hdr-sub">ULTRASONIC SENSOR MONITORING ─ MARINE APPLICATION ─ IST</div>
     </div>
     <div class="hdr-right">
@@ -1548,7 +1548,7 @@ function downloadCSV() {
   if (csvRows.length === 0) return;
   var now = new Date();
   var meta = [
-    '# Bow Sensor Fault Detection — Exported Data',
+    '# Ultrasonic Sensor Fault Detection — Exported Data',
     '# Export timestamp: ' + toIST(now),
     '# Recording start:  ' + toIST(recStartTime),
     '# Total rows: ' + csvRows.length,
@@ -1565,7 +1565,7 @@ function downloadCSV() {
   var csvContent = meta + '\n' + CSV_HEADER + '\n' + lines.join('\n');
   var pad2 = function(n){ return String(n).padStart(2,'0'); };
   var istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
-  var fn = 'bow_sensor_' + istNow.getUTCFullYear()
+  var fn = 'Ultrasonic_sensor_' + istNow.getUTCFullYear()
     + pad2(istNow.getUTCMonth()+1) + pad2(istNow.getUTCDate())
     + '_' + pad2(istNow.getUTCHours()) + pad2(istNow.getUTCMinutes())
     + pad2(istNow.getUTCSeconds()) + '_IST.csv';
