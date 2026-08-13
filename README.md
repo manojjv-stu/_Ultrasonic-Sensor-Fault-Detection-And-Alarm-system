@@ -9,6 +9,13 @@ The system simulates ultrasonic sensor behaviour under normal operating conditio
 > **Note:** This project is currently a simulation-based system. It does not acquire data from a physical ultrasonic sensor and does not currently use a trained machine-learning model.
 
 ---
+## 🚀 Live Demo
+
+The project is deployed on Vercel and can be accessed through the following link:
+
+**Live Application:** [Ultrasonic Sensor Fault Detection & Alarm System](https://ultrasonic-sensor-fault-detection-a.vercel.app)
+
+You can interact with the real-time simulation, inject different sensor fault scenarios, monitor anomaly scores, view alarms, and record simulated sensor data directly from the browser.
 
 ## Objectives
 
